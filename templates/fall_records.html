@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style3.css') }}">
+    <title>Fall Detection Records</title>
+    <style>
+        .btn-export { background:#1a9cf7; color:#fff; border-radius:6px; border:0; padding:8px 12px; margin-left:8px; cursor:pointer; }
+        .btn-delete { background:#ff5b5b; color:#fff; border-radius:6px; border:none; padding:4px 8px; font-size:12px; cursor:pointer; }
+        .record-item { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid #d9d9d9; border-radius:8px; margin-bottom:8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚨 Fall Detection Records</h1>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Falls Detected</h3>
+                <div class="value" id="total-falls">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Last 24 Hours</h3>
+                <div class="value" id="recent-falls">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>High Severity</h3>
+                <div class="value" id="high-severity">0</div>
+            </div>
+            <div class="stat-card">
+                <h3>Average Confidence</h3>
+                <div class="value" id="average-confidence">0%</div>
+            </div>
+            <div class="stat-card">
+                <h3>Time Since Last Fall</h3>
+                <div class="value" id="since-last-fall">N/A</div>
+            </div>
+            <div class="stat-card">
+                <h3>Risk Level</h3>
+                <div class="value" id="risk-level">LOW</div>
+            </div>
+            <div class="stat-card" style="grid-column: span 2;">
+                <h3>Severity Filter</h3>
+                <select id="severity-filter" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;">
+                    <option value="ALL">All</option>
+                    <option value="HIGH">High</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="LOW">Low</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="records-section">
+            <h2>Detection History</h2>
+            <div class="trend-panel">
+                <h3>7-Day Fall Trend</h3>
+                <canvas id="trendCanvas" width="660" height="220" style="border:1px solid #ddd; background:#fff; border-radius: 8px;"></canvas>
+                <p style="margin:4px 0 0; font-size:14px; color:#666;">Average daily falls: <span id="trend-average">0</span></p>
+            </div>
+            <div id="records-container" class="loading">
+                Loading records...
+            </div>
+        </div>
+
+        <div class="buttons">
+            <button class="btn-refresh" onclick="loadRecords()">🔄 Refresh</button>
+            <button class="btn-export" onclick="exportCSV()">⤓ Export CSV</button>
+            <button class="btn-clear" onclick="confirmClear()">🗑️ Clear Records</button>
+            <button class="btn-back" onclick="goHome()">← Back to Home</button>
+        </div>
+    </div>
+
+    <div id="clearModal" class="modal">
+        <div class="modal-content">
+            <h2>Clear All Records?</h2>
+            <p>This action cannot be undone.</p>
+            <div class="modal-buttons">
+                <button class="btn-confirm" onclick="clearRecords()">Yes, Clear</button>
+                <button class="btn-cancel" onclick="closeClearModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function loadRecords() {
+            fetch('/fall_records')
+                .then(response => response.json())
+                .then(records => {
+                    displayRecords(records);
+                    updateStats(records);
+                })
+                .catch(error => {
+                    console.error('Error loading records:', error);
+                    document.getElementById('records-container').innerHTML = 
+                        '<div class="empty-state"><p>Error loading records</p></div>';
+                });
+        }
+
+        function displayRecords(records) {
+            const container = document.getElementById('records-container');
+            
+            if (!records || records.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path>
+                            <path d="M12 6v6l4 2.5"></path>
+                        </svg>
+                        <h3>No Fall Records Yet</h3>
+                        <p>Fall detection is active and monitoring...</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const selectedSeverity = document.getElementById('severity-filter').value;
+            const filteredRecords = (selectedSeverity === 'ALL')
+                ? records
+                : records.filter(r => r.severity === selectedSeverity);
+
+            const html = filteredRecords.slice().reverse().map(record => `
+                <div class="record-item">
+                    <div class="record-details" style="width: 85%;">
+                        <div class="record-time">📅 ${new Date(record.timestamp).toLocaleString()}</div>
+                        <div class="record-info">
+                            <span>ID: ${record.id}</span>
+                            <span>📍 Location: (${record.location.x}, ${record.location.y})</span>
+                            <span>📏 Size: ${record.location.width}x${record.location.height}px</span>
+                        </div>
+                    </div>
+                    <div style="text-align: right; width: 15%;">
+                        <button class="btn-delete" onclick="removeRecord(${record.id})">🗑️</button>
+                        <div class="confidence">${(record.confidence * 100).toFixed(0)}%</div>
+                        <div class="severity ${record.severity}">${record.severity}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = html;
+        }
+
+        function updateStats(records) {
+            document.getElementById('total-falls').textContent = records.length;
+
+            const now = new Date();
+            const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            const recent = records.filter(r => new Date(r.timestamp) > oneDayAgo).length;
+            document.getElementById('recent-falls').textContent = recent;
+
+            const highSeverity = records.filter(r => r.severity === 'HIGH').length;
+            document.getElementById('high-severity').textContent = highSeverity;
+
+            const avgConfidence = records.length ? (records.reduce((sum, r) => sum + Number(r.confidence || 0), 0) / records.length) : 0;
+            document.getElementById('average-confidence').textContent = `${(avgConfidence * 100).toFixed(1)}%`;
+
+            if (records.length) {
+                const last = new Date(records[records.length - 1].timestamp);
+                const mins = ((new Date() - last) / 1000 / 60).toFixed(1);
+                document.getElementById('since-last-fall').textContent = `${mins} min`;
+            } else {
+                document.getElementById('since-last-fall').textContent = 'N/A';
+            }
+
+            const riskRatio = records.length ? highSeverity / records.length : 0;
+            let riskLevel = 'LOW';
+            if (riskRatio >= 0.50) riskLevel = 'HIGH';
+            else if (riskRatio >= 0.20) riskLevel = 'MEDIUM';
+            document.getElementById('risk-level').textContent = riskLevel;
+        }
+
+        function confirmClear() {
+            document.getElementById('clearModal').style.display = 'block';
+        }
+
+        function closeClearModal() {
+            document.getElementById('clearModal').style.display = 'none';
+        }
+
+        function clearRecords() {
+            fetch('/fall_records/clear', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    closeClearModal();
+                    loadRecords();
+                    alert('Records cleared successfully!');
+                })
+                .catch(error => {
+                    console.error('Error clearing records:', error);
+                    alert('Error clearing records');
+                });
+        }
+
+        function goHome() {
+            window.location.href = '/home';
+        }
+
+        function removeRecord(recordId) {
+            if (!confirm('Delete this fall record permanently?')) return;
+
+            fetch(`/fall_records/${recordId}`, { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Error deleting record: ' + data.error);
+                    } else {
+                        loadRecords();
+                        loadTrend();
+                        alert('Record deleted successfully.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error deleting record:', error);
+                    alert('Failed to delete record');
+                });
+        }
+
+        function exportCSV() {
+            window.location.href = '/fall_records/export';
+        }
+
+        function loadTrend() {
+            fetch('/fall_records/trend')
+                .then(response => response.json())
+                .then(data => {
+                    const trend = data.trend || [];
+                    document.getElementById('trend-average').textContent = (data.average_daily || 0).toFixed(1);
+                    renderTrendChart(trend);
+                })
+                .catch(err => {
+                    console.error('Error loading trend:', err);
+                });
+        }
+
+        function renderTrendChart(trend) {
+            const canvas = document.getElementById('trendCanvas');
+            const ctx = canvas.getContext('2d');
+            const padding = 32;
+            const width = canvas.width - padding * 2;
+            const height = canvas.height - padding * 2;
+            const maxCount = Math.max(1, ...trend.map(item => item.count));
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barWidth = width / Math.max(trend.length, 1) * 0.7;
+            const gap = width / Math.max(trend.length, 1) * 0.3;
+
+            trend.forEach((item, i) => {
+                const x = padding + i * (barWidth + gap) + gap / 2;
+                const barHeight = (item.count / maxCount) * height;
+                const y = canvas.height - padding - barHeight;
+
+                ctx.fillStyle = '#0b76d7';
+                ctx.fillRect(x, y, barWidth, barHeight);
+
+                ctx.fillStyle = '#333';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(item.count, x + barWidth / 2, y - 6);
+
+                const label = new Date(item.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                ctx.fillText(label, x + barWidth / 2, canvas.height - padding + 16);
+            });
+
+            ctx.strokeStyle = '#ccc';
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, canvas.height - padding);
+            ctx.lineTo(canvas.width - padding, canvas.height - padding);
+            ctx.stroke();
+        }
+
+        // Load records on page load
+        window.addEventListener('load', function () {
+            loadRecords();
+            loadTrend();
+            document.getElementById('severity-filter').addEventListener('change', loadRecords);
+        });
+
+        // Auto-refresh every 5 seconds
+        setInterval(function () {
+            loadRecords();
+            loadTrend();
+        }, 5000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FallEye | Vision Safety</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="{{ url_for('static', filename='style2.css') }}">
+
+
+</head>
+
+<body data-has-cv2="{{ has_cv2|lower }}">
+
+<!-- ALERT UI -->
+<div class="alert-box" id="alertBox">
+    🚨 FALL DETECTED! Immediate Attention Required!
+</div>
+
+<div class="alert-history" id="alertHistory">
+    <h3>Alert Log</h3>
+</div>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+    <h2 class="logo">𝑭𝒂𝒍𝒍𝑬𝒚𝒆</h2>
+    <div class="nav-links">
+        <a href="#">Home</a>
+        <a href="#features">Features</a>
+        <a href="#preview">Live</a>
+        <a href="#contact">Contact</a>
+        <a href="/logout">Logout</a>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-content">
+
+        <div class="hero-text">
+            <h1>𝑭𝒂𝒍𝒍𝑬𝒚𝒆</h1>
+            <p class="tagline">Smart Vision for Elder Safety</p>
+            <p class="quote">"Every fall matters. Every second counts."</p>
+            <button onclick="startCamera()">Start Live Preview📸</button>
+            <button class="alert-btn" onclick="triggerAlert('FALL')">Test Alert🔔</button>
+            <button class="records-btn" onclick="viewFallRecords()">View Fall Records🔍</button>
+            <label style="display:block;margin-top:1rem;">
+                <input type="checkbox" id="emailToggle" onchange="updateEmailToggle()">
+                Email alerts for confirmed falls
+            </label>
+            
+        </div>
+
+        <div class="hero-image">
+            <img src="{{ url_for('static', filename='images/hero.jpg') }}">
+        </div>
+
+    </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+    <h2>System Highlights</h2>
+    <div class="feature-box">
+
+        <div class="card">
+            <img src="{{ url_for('static', filename='images/feature_ai.jpg') }}">
+            <p>AI Vision Detection</p>
+        </div>
+
+        <div class="card">
+            <img src="{{ url_for('static', filename='images/feature_alert.jpg') }}">
+            <p>Instant Alerts</p>
+        </div>
+
+        <div class="card">
+            <img src="{{ url_for('static', filename='images/feature_nowear.jpg') }}">
+            <p>No Wearable Device</p>
+        </div>
+
+        <div class="card">
+            <img src="{{ url_for('static', filename='images/feature_privacy.jpg') }}">
+            <p>Privacy Protection</p>
+        </div>
+
+    </div>
+</section>
+
+<!-- PREVIEW -->
+<section class="preview" id="preview">
+    <h2>Live Camera Preview</h2>
+    {% if has_cv2 %}
+    <div class="stream-container">
+        <img id="mjpeg" alt="Live stream" style="max-width:100%;height:auto;display:block;margin:0 auto;" />
+    </div>
+    <p id="status">Click "Start Live Preview" to begin camera feed</p>
+    {% else %}
+    <div class="stream-container">
+        <video id="video" muted playsinline style="max-width:100%;height:auto;display:block;margin:0 auto;"></video>
+    </div>
+    <p id="status">Click "Start Live Preview" to begin camera feed</p>
+    {% endif %}
+</section>
+
+<!-- FOOTER -->
+<footer id="contact">
+    © 2026 FallEye | Vision Based Elder Safety
+</footer>
+
+<!-- SCRIPT -->
+<script>
+let fallCheckInterval = null;
+let has_cv2 = document.body.dataset.hasCv2 === 'true';
+
+function startCamera(){
+    const status = document.getElementById("status");
+    if (has_cv2) {
+    const img = document.getElementById("mjpeg");
+    img.src = "{{ url_for('video_feed') }}?t=" + Date.now();
+    status.textContent = "Server stream active ✅";
+    
+    // Start monitoring for falls
+    startFallDetection();
+    } else {
+    const video = document.getElementById("video");
+    navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+        video.srcObject = stream;
+        status.textContent = "Live Camera Active ✅";
+    })
+    .catch(err => {
+        status.textContent = "Camera Access Denied ❌";
+    });
+    }
+}
+
+// FALL DETECTION MONITORING
+function startFallDetection(){
+    if(fallCheckInterval) clearInterval(fallCheckInterval);
+    
+    fallCheckInterval = setInterval(()=>{
+        fetch("{{ url_for('fall_status') }}")
+        .then(response => response.json())
+        .then(data => {
+            // Trigger alert for confirmed falls
+            if(data.fall_detected){
+                triggerAlert('FALL');
+            }
+            // Trigger alert for potential falls
+            else if(data.potential_fall){
+                triggerAlert('POTENTIAL');
+            }
+        })
+        .catch(err => console.error("Error checking fall status:", err));
+    }, 500); // Check every 500ms
+}
+
+// ALERT SYSTEM
+function triggerAlert(type = 'FALL'){
+    const alertBox = document.getElementById("alertBox");
+    const alertHistory = document.getElementById("alertHistory");
+
+    const time = new Date().toLocaleTimeString();
+
+    alertBox.classList.add("show");
+
+    const entry = document.createElement("p");
+    if (type === 'FALL') {
+        entry.innerHTML = "🚨 FALL DETECTED at " + time;
+        alertBox.style.backgroundColor = "#ff4444";
+    } else if (type === 'POTENTIAL') {
+        entry.innerHTML = "⚠️ POTENTIAL FALL at " + time;
+        alertBox.style.backgroundColor = "#ff9800";
+    }
+    alertHistory.appendChild(entry);
+
+    setTimeout(()=>{
+        alertBox.classList.remove("show");
+        alertBox.style.backgroundColor = "#ff4444"; // Reset to red
+    }, 5000);
+
+    // Play audio alert for both types
+    const audio = new Audio("{{ url_for('static', filename='fall alert.mp3') }}");
+    audio.play().catch(err => console.log("Could not play audio:", err));
+}
+
+function viewFallRecords() {
+    window.location.href = "/fall_records_page";
+}
+
+function updateEmailToggle() {
+    const enabled = document.getElementById('emailToggle').checked;
+    fetch('/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email_alert_enabled: enabled })
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`Settings update failed (${response.status})`);
+    })
+    .catch(err => console.error('Error updating email toggle:', err));
+}
+
+function loadSettings() {
+    fetch('/settings')
+        .then(response => {
+            if (!response.ok) throw new Error(`Settings request failed (${response.status})`);
+            return response.json();
+        })
+        .then(data => {
+            document.getElementById('emailToggle').checked = data.email_alert_enabled;
+        })
+        .catch(err => console.warn('Could not load settings', err));
+}
+
+window.addEventListener('load', loadSettings);
+</script>
+
+</body>
+</html>
